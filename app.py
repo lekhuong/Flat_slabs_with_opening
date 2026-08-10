@@ -1,6 +1,3 @@
-
-
-
 from pathlib import Path
 import joblib
 import numpy as np
@@ -93,13 +90,6 @@ def norm(s):
             .replace("(","").replace(")",""))
 
 def make_X(model, d, c, fc, sqrt_fc, rho, ad, Dop, Sop):
-    """
-    Build the model input using the exact feature names stored in the fitted RF model.
-
-    The web interface computes both fc and sqrt(fc), because saved RF models may
-    contain either fc_prime_MPa or a transformed sqrt(fc) feature depending on
-    how the training dataframe was exported.
-    """
     vals = {
         "d": d,
         "c": c,
@@ -112,19 +102,16 @@ def make_X(model, d, c, fc, sqrt_fc, rho, ad, Dop, Sop):
     }
 
     aliases = {
-        # Effective depth
         "d": "d",
         "d_mm": "d",
         "effective_depth": "d",
         "effective_depth_mm": "d",
 
-        # Column dimension
         "c": "c",
         "c_mm": "c",
         "column_width": "c",
         "column_dimension": "c",
 
-        # Concrete compressive strength used directly
         "fc": "fc",
         "fc_mpa": "fc",
         "fc_prime": "fc",
@@ -134,7 +121,6 @@ def make_X(model, d, c, fc, sqrt_fc, rho, ad, Dop, Sop):
         "concrete_strength": "fc",
         "concrete_compressive_strength": "fc",
 
-        # Square-root concrete-strength transformation
         "sqrt_fc": "sqrt_fc",
         "sqrt_f_c": "sqrt_fc",
         "sqrt_fc_prime": "sqrt_fc",
@@ -142,24 +128,20 @@ def make_X(model, d, c, fc, sqrt_fc, rho, ad, Dop, Sop):
         "sqrt_concrete_strength": "sqrt_fc",
         "sqrt_concrete_compressive_strength": "sqrt_fc",
 
-        # Reinforcement ratio
         "rho": "rho",
         "rho_percent": "rho",
         "reinforcement_ratio": "rho",
         "flexural_reinforcement_ratio": "rho",
 
-        # Shear-span ratio
         "a_over_d": "a_over_d",
         "a_d": "a_over_d",
         "shear_span_to_depth_ratio": "a_over_d",
 
-        # Opening size
         "dop": "dop",
         "dop_mm": "dop",
         "opening_size": "dop",
         "opening_size_mm": "dop",
 
-        # Opening distance
         "sop": "sop",
         "sop_mm": "sop",
         "opening_distance": "sop",
@@ -175,7 +157,6 @@ def make_X(model, d, c, fc, sqrt_fc, rho, ad, Dop, Sop):
             n = norm(col)
             key = aliases.get(n)
 
-            # Flexible fallbacks for slightly different saved column names
             if key is None and n.startswith("sqrt") and ("fc" in n or "concrete" in n):
                 key = "sqrt_fc"
             if key is None and ("fc_prime" in n or "f_c_prime" in n):
@@ -199,8 +180,6 @@ def make_X(model, d, c, fc, sqrt_fc, rho, ad, Dop, Sop):
 
         return pd.DataFrame([row], columns=cols)
 
-    # Fallback only if the model was fitted from a NumPy array.
-    # IMPORTANT: this assumes the seven-feature order below.
     return np.array([[d, c, fc, rho, ad, Dop, Sop]], dtype=float)
 
 def in_range(v, lo, hi):
@@ -210,9 +189,9 @@ def metric_card(caption, value, unit="", ratio=.5):
     h = max(4, min(46, 46*float(ratio)))
     st.markdown(f"""
     <div>
-      <div class="metric-caption">{caption}</div>
-      <span class="metric-value">{value}</span><span class="metric-unit">{unit}</span>
-      <div class="mini"><div class="bar" style="height:{h:.1f}px"></div></div>
+      <div class="metric-caption">{{caption}}</div>
+      <span class="metric-value">{{value}}</span><span class="metric-unit">{{unit}}</span>
+      <div class="mini"><div class="bar" style="height:{{h:.1f}}px"></div></div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -241,7 +220,7 @@ with st.sidebar:
     ad = a/d if d > 0 else np.nan
 
     if case == "Solid slab / no opening":
-        Dop, Sop = 0.0, 0.0
+        Dop, Sop = 0.0, 1000.0
     else:
         Dop, Sop = Dop_ui, Sop_ui
 
@@ -249,12 +228,12 @@ with st.sidebar:
     if d > 0:
         st.markdown(f"""
         <div class="derived">
-          <b>d</b> = {d:.1f} mm<br>
-          <b>a/d</b> = {ad:.3f}<br>
-          <b>f'c</b> = {fc:.3f} MPa<br>
-          <b>√f'c</b> = {sqrt_fc:.3f}<br>
-          <b>Dop used</b> = {Dop:.1f} mm<br>
-          <b>Sop used</b> = {Sop:.1f} mm
+          <b>d</b> = {{d:.1f}} mm<br>
+          <b>a/d</b> = {{ad:.3f}}<br>
+          <b>f'c</b> = {{fc:.3f}} MPa<br>
+          <b>√f'c</b> = {{sqrt_fc:.3f}}<br>
+          <b>Dop used</b> = {{Dop:.1f}} mm<br>
+          <b>Sop used</b> = {{Sop:.1f}} mm
         </div>
         """, unsafe_allow_html=True)
     else:
@@ -401,7 +380,7 @@ with st.expander("▸ Predictor transformation used by the app"):
 - \(a/d = a / d\)
 - Both \(f'_c\) and \(\sqrt{f'_c}\) are calculated/retained internally.
 - The application sends the concrete-strength representation required by the saved RF feature name.
-- For a solid slab, the model receives \(D_{op}=0\) and \(S_{op}=0\).
+- For a solid slab, the model receives \(D_{op}=0\) and \(S_{op}=1000\).
 """)
 
 with st.expander("▸ Important modelling note"):
