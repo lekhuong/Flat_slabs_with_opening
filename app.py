@@ -1,4 +1,6 @@
 
+
+
 from pathlib import Path
 import joblib
 import numpy as np
@@ -90,31 +92,94 @@ def norm(s):
             .replace("/","_over_").replace("-","_").replace(" ","_")
             .replace("(","").replace(")",""))
 
-def make_X(model, d, c, sqrt_fc, rho, ad, Dop, Sop):
+def make_X(model, d, c, fc, sqrt_fc, rho, ad, Dop, Sop):
+    """
+    Build the model input using the exact feature names stored in the fitted RF model.
+
+    The web interface computes both fc and sqrt(fc), because saved RF models may
+    contain either fc_prime_MPa or a transformed sqrt(fc) feature depending on
+    how the training dataframe was exported.
+    """
     vals = {
-        "d":d, "c":c, "sqrt_fc":sqrt_fc, "rho":rho,
-        "a_over_d":ad, "dop":Dop, "sop":Sop
+        "d": d,
+        "c": c,
+        "fc": fc,
+        "sqrt_fc": sqrt_fc,
+        "rho": rho,
+        "a_over_d": ad,
+        "dop": Dop,
+        "sop": Sop,
     }
+
     aliases = {
-        "d":"d","d_mm":"d","effective_depth":"d","effective_depth_mm":"d",
-        "c":"c","c_mm":"c","column_width":"c","column_dimension":"c",
-        "sqrt_fc":"sqrt_fc","sqrt_f_c":"sqrt_fc","sqrt_fc_prime":"sqrt_fc",
-        "sqrt_f_c_prime":"sqrt_fc","sqrt_concrete_strength":"sqrt_fc",
-        "rho":"rho","rho_percent":"rho","reinforcement_ratio":"rho",
-        "flexural_reinforcement_ratio":"rho",
-        "a_over_d":"a_over_d","a_d":"a_over_d","shear_span_to_depth_ratio":"a_over_d",
-        "dop":"dop","dop_mm":"dop","opening_size":"dop","opening_size_mm":"dop",
-        "sop":"sop","sop_mm":"sop","opening_distance":"sop",
-        "opening_distance_mm":"sop","opening_distance_to_column_face":"sop",
+        # Effective depth
+        "d": "d",
+        "d_mm": "d",
+        "effective_depth": "d",
+        "effective_depth_mm": "d",
+
+        # Column dimension
+        "c": "c",
+        "c_mm": "c",
+        "column_width": "c",
+        "column_dimension": "c",
+
+        # Concrete compressive strength used directly
+        "fc": "fc",
+        "fc_mpa": "fc",
+        "fc_prime": "fc",
+        "fc_prime_mpa": "fc",
+        "f_c_prime": "fc",
+        "f_c_prime_mpa": "fc",
+        "concrete_strength": "fc",
+        "concrete_compressive_strength": "fc",
+
+        # Square-root concrete-strength transformation
+        "sqrt_fc": "sqrt_fc",
+        "sqrt_f_c": "sqrt_fc",
+        "sqrt_fc_prime": "sqrt_fc",
+        "sqrt_f_c_prime": "sqrt_fc",
+        "sqrt_concrete_strength": "sqrt_fc",
+        "sqrt_concrete_compressive_strength": "sqrt_fc",
+
+        # Reinforcement ratio
+        "rho": "rho",
+        "rho_percent": "rho",
+        "reinforcement_ratio": "rho",
+        "flexural_reinforcement_ratio": "rho",
+
+        # Shear-span ratio
+        "a_over_d": "a_over_d",
+        "a_d": "a_over_d",
+        "shear_span_to_depth_ratio": "a_over_d",
+
+        # Opening size
+        "dop": "dop",
+        "dop_mm": "dop",
+        "opening_size": "dop",
+        "opening_size_mm": "dop",
+
+        # Opening distance
+        "sop": "sop",
+        "sop_mm": "sop",
+        "opening_distance": "sop",
+        "opening_distance_mm": "sop",
+        "opening_distance_to_column_face": "sop",
     }
+
     if hasattr(model, "feature_names_in_"):
         cols = list(model.feature_names_in_)
         row = {}
+
         for col in cols:
             n = norm(col)
             key = aliases.get(n)
+
+            # Flexible fallbacks for slightly different saved column names
             if key is None and n.startswith("sqrt") and ("fc" in n or "concrete" in n):
                 key = "sqrt_fc"
+            if key is None and ("fc_prime" in n or "f_c_prime" in n):
+                key = "fc"
             if key is None and ("opening" in n and ("size" in n or "dop" in n)):
                 key = "dop"
             if key is None and ("opening" in n and ("distance" in n or "sop" in n or "dist" in n)):
@@ -123,11 +188,20 @@ def make_X(model, d, c, sqrt_fc, rho, ad, Dop, Sop):
                 key = "rho"
             if key is None and ("a_over_d" in n or "shear_span" in n):
                 key = "a_over_d"
+
             if key is None:
-                raise ValueError(f"Unrecognized feature name in saved model: {col}")
+                raise ValueError(
+                    f"Unrecognized feature name in saved model: {col}. "
+                    f"Saved feature list: {cols}"
+                )
+
             row[col] = vals[key]
+
         return pd.DataFrame([row], columns=cols)
-    return np.array([[d,c,sqrt_fc,rho,ad,Dop,Sop]], dtype=float)
+
+    # Fallback only if the model was fitted from a NumPy array.
+    # IMPORTANT: this assumes the seven-feature order below.
+    return np.array([[d, c, fc, rho, ad, Dop, Sop]], dtype=float)
 
 def in_range(v, lo, hi):
     return lo <= v <= hi
@@ -177,6 +251,7 @@ with st.sidebar:
         <div class="derived">
           <b>d</b> = {d:.1f} mm<br>
           <b>a/d</b> = {ad:.3f}<br>
+          <b>f'c</b> = {fc:.3f} MPa<br>
           <b>√f'c</b> = {sqrt_fc:.3f}<br>
           <b>Dop used</b> = {Dop:.1f} mm<br>
           <b>Sop used</b> = {Sop:.1f} mm
@@ -194,7 +269,7 @@ st.markdown("""
 <div class="subtitle">
 A diagnostic benchmark tool for punching shear prediction of RC flat slabs with openings.
 The interface keeps practical inputs <b>h</b>, <b>cover</b>, and shear span <b>a</b>, while
-internally deriving the seven predictors used by the optimized Random Forest model.
+internally deriving the variables required by the optimized Random Forest model.
 </div>
 """, unsafe_allow_html=True)
 
@@ -210,6 +285,7 @@ if "pred" not in st.session_state:
     st.session_state.pred = None
     st.session_state.model_name = None
     st.session_state.err = None
+    st.session_state.model_features = None
 
 if run:
     if d <= 0:
@@ -218,9 +294,14 @@ if run:
     else:
         try:
             model, name = load_model()
-            X = make_X(model, d, c, sqrt_fc, rho, ad, Dop, Sop)
+            X = make_X(model, d, c, fc, sqrt_fc, rho, ad, Dop, Sop)
             st.session_state.pred = max(float(model.predict(X)[0]), 0.0)
             st.session_state.model_name = name
+            st.session_state.model_features = (
+                list(model.feature_names_in_)
+                if hasattr(model, "feature_names_in_")
+                else None
+            )
             st.session_state.err = None
         except Exception as e:
             st.session_state.err = str(e)
@@ -306,6 +387,9 @@ with st.expander("▸ Random Forest model information"):
     )
     if st.session_state.model_name:
         st.write(f"Loaded model: `{st.session_state.model_name}`")
+    if st.session_state.model_features:
+        st.write("Saved RF feature names:")
+        st.code(str(st.session_state.model_features))
     st.write(
         "Reported independent-test performance used in the manuscript: "
         "R² = 0.9720, RMSE = 33.07 kN, MAE = 22.84 kN, MAPE = 11.86%."
@@ -315,11 +399,9 @@ with st.expander("▸ Predictor transformation used by the app"):
     st.markdown(r"""
 - \(d = h - cover\)
 - \(a/d = a / d\)
-- \(\sqrt{f'_c}\) is calculated internally from the entered concrete strength.
+- Both \(f'_c\) and \(\sqrt{f'_c}\) are calculated/retained internally.
+- The application sends the concrete-strength representation required by the saved RF feature name.
 - For a solid slab, the model receives \(D_{op}=0\) and \(S_{op}=0\).
-
-The final RF input vector is:
-\(d,\;c,\;\sqrt{f'_c},\;\rho,\;a/d,\;D_{op},\;S_{op}\).
 """)
 
 with st.expander("▸ Important modelling note"):
