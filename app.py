@@ -189,9 +189,9 @@ def metric_card(caption, value, unit="", ratio=.5):
     h = max(4, min(46, 46*float(ratio)))
     st.markdown(f"""
     <div>
-      <div class="metric-caption">{{caption}}</div>
-      <span class="metric-value">{{value}}</span><span class="metric-unit">{{unit}}</span>
-      <div class="mini"><div class="bar" style="height:{{h:.1f}}px"></div></div>
+      <div class="metric-caption">{caption}</div>
+      <span class="metric-value">{value}</span><span class="metric-unit">{unit}</span>
+      <div class="mini"><div class="bar" style="height:{h:.1f}px"></div></div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -228,12 +228,12 @@ with st.sidebar:
     if d > 0:
         st.markdown(f"""
         <div class="derived">
-          <b>d</b> = {{d:.1f}} mm<br>
-          <b>a/d</b> = {{ad:.3f}}<br>
-          <b>f'c</b> = {{fc:.3f}} MPa<br>
-          <b>√f'c</b> = {{sqrt_fc:.3f}}<br>
-          <b>Dop used</b> = {{Dop:.1f}} mm<br>
-          <b>Sop used</b> = {{Sop:.1f}} mm
+          <b>d</b> = {d:.1f} mm<br>
+          <b>a/d</b> = {ad:.3f}<br>
+          <b>f'c</b> = {fc:.3f} MPa<br>
+          <b>√f'c</b> = {sqrt_fc:.3f}<br>
+          <b>Dop used</b> = {Dop:.1f} mm<br>
+          <b>Sop used</b> = {Sop:.1f} mm
         </div>
         """, unsafe_allow_html=True)
     else:
@@ -390,3 +390,4 @@ with st.expander("▸ Important modelling note"):
     )
 
 st.caption("OpenPunch-RF · Research prototype · University of Transport and Communications")
+
