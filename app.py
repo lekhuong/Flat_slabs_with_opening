@@ -5,7 +5,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(
-    page_title="OpenPunch-RF",
+    page_title="OpenPunch",
     page_icon="◼",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -13,8 +13,7 @@ st.set_page_config(
 
 BASE_DIR = Path(__file__).resolve().parent
 MODEL_FILES = [
-    BASE_DIR / "best_rf_model.joblib",
-    BASE_DIR / "best_random_forest_model.joblib",
+    BASE_DIR / "best_catboost_model.joblib",
 ]
 
 RANGES = {
@@ -88,8 +87,7 @@ def load_model():
         if p.exists():
             return joblib.load(p), p.name
     raise FileNotFoundError(
-        "Random Forest model not found. Put best_rf_model.joblib "
-        "or best_random_forest_model.joblib beside app.py."
+        "Model not found. Put best_catboost_model.joblib beside app.py."
     )
 
 def norm(s):
@@ -157,38 +155,9 @@ def make_X(model, d, c, fc, sqrt_fc, rho, ad, Dop, Sop):
         "opening_distance_to_column_face": "sop",
     }
 
-    if hasattr(model, "feature_names_in_"):
-        cols = list(model.feature_names_in_)
-        row = {}
-
-        for col in cols:
-            n = norm(col)
-            key = aliases.get(n)
-
-            if key is None and n.startswith("sqrt") and ("fc" in n or "concrete" in n):
-                key = "sqrt_fc"
-            if key is None and ("fc_prime" in n or "f_c_prime" in n):
-                key = "fc"
-            if key is None and ("opening" in n and ("size" in n or "dop" in n)):
-                key = "dop"
-            if key is None and ("opening" in n and ("distance" in n or "sop" in n or "dist" in n)):
-                key = "sop"
-            if key is None and ("rho" in n or "reinforcement_ratio" in n):
-                key = "rho"
-            if key is None and ("a_over_d" in n or "shear_span" in n):
-                key = "a_over_d"
-
-            if key is None:
-                raise ValueError(
-                    f"Unrecognized feature name in saved model: {col}. "
-                    f"Saved feature list: {cols}"
-                )
-
-            row[col] = vals[key]
-
-        return pd.DataFrame([row], columns=cols)
-
-    return np.array([[d, c, fc, rho, ad, Dop, Sop]], dtype=float)
+    # The CatBoost model was trained on these seven variables, in this order and with these names.
+    return pd.DataFrame([[d, c, sqrt_fc, rho, ad, Dop, Sop]],
+                        columns=["d", "c", "sqrt_fc", "rho", "a_over_d", "Dop", "Sop"])
 
 def in_range(v, lo, hi):
     return lo <= v <= hi
@@ -247,22 +216,23 @@ with st.sidebar:
     else:
         st.error("d = h − cover must be greater than zero.")
 
-    run = st.button("Run RF diagnostic")
+    run = st.button("Run diagnostic")
 
 # ---------------- HEADER ----------------
-st.markdown('<div class="kicker">Random Forest diagnostic predictor</div>', unsafe_allow_html=True)
-st.markdown('<div class="title">OpenPunch-RF</div>', unsafe_allow_html=True)
+st.markdown('<div class="kicker">CatBoost diagnostic predictor</div>', unsafe_allow_html=True)
+st.markdown('<div class="title">OpenPunch</div>', unsafe_allow_html=True)
 st.markdown("""
 <div class="subtitle">
 A diagnostic benchmark tool for punching shear prediction of RC flat slabs with openings.
 The interface keeps practical inputs <b>h</b>, <b>cover</b>, and shear span <b>a</b>, while
-internally deriving the variables required by the optimized Random Forest model.
+internally deriving the variables required by the optimized CatBoost model.
 </div>
 """, unsafe_allow_html=True)
 
 st.markdown("""
 <div class="notice">
-<b>Research diagnostic.</b> Predictions are data-driven and should be interpreted within
+<b>Research diagnostic.</b> The maintained browser version of this tool, with the data and code, is at
+<a href="https://lekhuong.github.io/OpenPunch/">lekhuong.github.io/OpenPunch</a>. Predictions are data-driven and should be interpreted within
 the experimental domain used to train the model. The application is intended for research
 and preliminary assessment, not as a replacement for code-based design verification.
 </div>
@@ -284,11 +254,7 @@ if run:
             X = make_X(model, d, c, fc, sqrt_fc, rho, ad, Dop, Sop)
             st.session_state.pred = max(float(model.predict(X)[0]), 0.0)
             st.session_state.model_name = name
-            st.session_state.model_features = (
-                list(model.feature_names_in_)
-                if hasattr(model, "feature_names_in_")
-                else None
-            )
+            st.session_state.model_features = list(X.columns)
             st.session_state.err = None
         except Exception as e:
             st.session_state.err = str(e)
@@ -303,9 +269,9 @@ c1,c2,c3 = st.columns(3, gap="large")
 
 with c1:
     if st.session_state.pred is None:
-        metric_card("Optimized Random Forest", "—", "kN", .35)
+        metric_card("Optimized CatBoost", "—", "kN", .35)
     else:
-        metric_card("Optimized Random Forest", f"{st.session_state.pred:.1f}", "kN",
+        metric_card("Optimized CatBoost", f"{st.session_state.pred:.1f}", "kN",
                     min(st.session_state.pred/700,1))
 
 with c2:
@@ -333,6 +299,10 @@ table["Status"] = [
     "Within range" if in_range(v,lo,hi) else "Outside range"
     for v,lo,hi in zip(table["Current value"],table["Training min"],table["Training max"])
 ]
+# Solid slabs are encoded as Dop = 0, Sop = 1000 mm, exactly as in the training data;
+# the Sop range (0-450 mm) refers to slabs with openings and is not checked for a solid slab.
+if case == "Solid slab / no opening":
+    table.loc[table["Symbol"] == "Sop", "Status"] = "Solid-slab code (as in training data)"
 
 st.dataframe(
     table,
@@ -363,23 +333,22 @@ else:
     <div class="bad">
     <b>Applicability warning.</b>
     The following predictor(s) fall outside the reported training ranges: <b>{syms}</b>.
-    The Random Forest prediction should therefore be interpreted with additional caution.
+    The prediction should therefore be interpreted with additional caution.
     </div>
     """, unsafe_allow_html=True)
 
-with st.expander("▸ Random Forest model information"):
+with st.expander("▸ Model information"):
     st.write(
-        "The app loads `best_rf_model.joblib` or `best_random_forest_model.joblib` "
-        "from the same repository folder as app.py."
+        "The app loads `best_catboost_model.joblib` from the same folder as app.py."
     )
     if st.session_state.model_name:
         st.write(f"Loaded model: `{st.session_state.model_name}`")
     if st.session_state.model_features:
-        st.write("Saved RF feature names:")
+        st.write("Saved model feature names:")
         st.code(str(st.session_state.model_features))
     st.write(
-        "Reported independent-test performance used in the manuscript: "
-        "R² = 0.9720, RMSE = 33.07 kN, MAE = 22.84 kN, MAPE = 11.86%."
+        "Held-out test performance reported in the manuscript (149 specimens): "
+        "R² = 0.963, RMSE = 61.97 kN, MAE = 34.70 kN, MAPE = 12.83%."
     )
 
 with st.expander("▸ Predictor transformation used by the app"):
@@ -387,7 +356,7 @@ with st.expander("▸ Predictor transformation used by the app"):
 - \(d = h - cover\)
 - \(a/d = a / d\)
 - Both \(f'_c\) and \(\sqrt{f'_c}\) are calculated/retained internally.
-- The application sends the concrete-strength representation required by the saved RF feature name.
+- The model receives d, c, √f'c, ρ, a/d, Dop and Sop, in that order.
 - For a solid slab, the model receives \(D_{op}=0\) and \(S_{op}=1000\).
 """)
 
@@ -397,5 +366,5 @@ with st.expander("▸ Important modelling note"):
         "For strict section geometry, effective depth should account for the reinforcement-bar centroid."
     )
 
-st.caption("OpenPunch-RF · Research prototype · University of Transport and Communications")
+st.caption("OpenPunch · Research prototype · University of Transport and Communications")
 
